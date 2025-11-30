@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# IntelliJ
+.idea/
+
+# Virtualenv
+venv/
+.venv/
+
+# Local data directory for block storage
+data/
+
+# MacOS
+.DS_Store
