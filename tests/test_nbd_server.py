@@ -3,6 +3,7 @@ import shutil
 
 from nbd_server.nbd_server import NbdServer
 from nbd_server.util import BLOCK_SIZE
+from nbd_server.file_storage import FileStorage
 
 
 TEST_BASE = "test_data"
@@ -22,11 +23,8 @@ def teardown_function():
 
 
 def make_server(size_blocks=10):
-    return NbdServer(
-        export_name="dev1",
-        total_size_bytes=BLOCK_SIZE * size_blocks,
-        base_path=TEST_BASE,
-    )
+    storage = FileStorage(TEST_BASE)
+    return NbdServer("dev1", total_size_bytes=BLOCK_SIZE * size_blocks, storage=storage)
 
 
 def test_single_block_write_and_read():

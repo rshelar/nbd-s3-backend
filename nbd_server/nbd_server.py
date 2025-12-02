@@ -16,9 +16,6 @@ For now, this backend uses FileStorage only. S3Storage can be added later
 and selected via configuration.
 """
 
-from typing import Optional
-
-from nbd_server.file_storage import FileStorage
 from nbd_server.util import (
     BLOCK_SIZE,
     blocks_touched,
@@ -41,8 +38,7 @@ class NbdServer:
             self,
             export_name: str,
             total_size_bytes: int,
-            base_path: str = "data",
-            storage: Optional[FileStorage] = None,
+            storage = None,
     ) -> None:
         """
         Args:
@@ -50,13 +46,11 @@ class NbdServer:
                          when storing blocks on disk.
             total_size_bytes: Size of the virtual block device in bytes.
                               get_size() will return this value.
-            base_path: Root path for FileStorage if storage is not provided.
-            storage: Optional Storage implementation. If None, a FileStorage
-                     instance rooted at base_path will be created.
+            storage: Storage object instantiated for either local FileStorage or remote Storage passed by the client.
         """
         self.export_name = export_name
         self.total_size_bytes = total_size_bytes
-        self.storage = storage or FileStorage(base_path=base_path)
+        self.storage = storage
 
     # ---------------------------------------------------------------------
     # Public API: these are the methods your NBD server / nbdkit plugin
@@ -83,6 +77,9 @@ class NbdServer:
         Returns:
             A bytes object of length `length`.
         """
+        if self.storage is None:
+            raise RuntimeError("No storage backend configured for NbdServer")
+
         if length == 0:
             return b""
 
@@ -131,6 +128,9 @@ class NbdServer:
             2. Modify only the overlapping slice
             3. Write back the full block via storage.write_block()
         """
+        if self.storage is None:
+            raise RuntimeError("No storage backend configured for NbdServer")
+
         length = len(data)
         if length == 0:
             return
