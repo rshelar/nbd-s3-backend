@@ -73,12 +73,12 @@ def create_server_from_args():
 
     return server
 
-def test_file_storage():
+def verify_file_storage():
     backend = NbdServer(export_name="testdev", total_size_bytes=BLOCK_SIZE * 10)
     backend.write(0, b"hello world")
     print(backend.read(0, 11))
 
-def test_s3_bucket_storage():
+def verify_s3_bucket_storage():
     storage = S3Storage(
         bucket="nbdbuket",
         export_name="testdev",
