@@ -1,86 +1,144 @@
-from abc import ABC, abstractmethod
+# nbd-s3-backend
 
-"""
-Storage Layer — Lowest Level of the Block Device Stack
-------------------------------------------------------
+A cloud-backed Network Block Device (NBD) backend that exposes a virtual block device over NBD and persists each block to S3-compatible object storage (or local filesystem). Designed to demonstrate block-device fundamentals, durable flush semantics, and clean separation between protocol handling and storage layers.
 
-This interface represents the *block-storage backend* for the NBD server.
+---
 
-Important architecture distinction:
+## 🚀 Overview
 
-    NBD Client (Linux kernel)
-            ↓  read(offset, length) / write(offset, data)
-    nbdkit NBD Server (C program)
-            ↓  calls Python plugin
-    nbd_backend.py  <-- handles offsets, block math, caching, RMW cycles
-            ↓
-    Storage (this file)  <-- operates ONLY on full fixed-size blocks
-            ↓
-    FileStorage / S3Storage implement actual persistence
+`nbd-s3-backend` implements the storage backend portion of an NBD server.  
+The NBD protocol is handled externally by `nbdkit`, while this backend handles:
 
-Why this layer does NOT take offsets:
--------------------------------------
-The NBD protocol sends read/write requests in terms of byte offsets.
-However, underlying block storage (local files, S3 objects) works best when
-reads and writes happen at *block granularity*. Therefore:
+- Block-level reads, writes, and flushes
+- Addressing via `offset` and `length`
+- Read-through caching and write-back buffering
+- Durable persistence to S3 or local disk
+- Arbitrary export namespaces
+- Configurable block size (default: 4096 bytes)
 
-  • The NBD plugin layer breaks offsets into (block_id, block_offset).
-  • It performs read-modify-write cycles for partial-block writes.
-  • It assembles blocks for partial reads.
-  • It tracks dirty blocks in cache for flush semantics.
+This makes it possible to format the virtual device with `ext4`, mount it, write files, unmount, and reconnect — with all data preserved across restarts.
 
-By the time a request reaches the Storage interface, the plugin has already
-computed exactly which *full block* needs to be persisted or retrieved.
+---
 
-Thus:
-    Storage reads/writes EXACTLY ONE BLOCK per call.
-    Storage MUST return `block_size` bytes.
-    Storage MUST write full blocks, not byte ranges.
+## 🧩 Architecture
 
-This strict boundary keeps the system simple, correct, and S3-compatible.
-"""
+```
+ext4 filesystem (inside VM)
+        ↓
+Linux NBD kernel client
+        ↓  (TCP, NBD protocol)
+nbdkit NBD server
+        ↓  (Python plugin callbacks)
+nbd-s3-backend
+    ├── Handle.cache    (per-connection read/write cache)
+    ├── FileStorage     (local persistent blocks)
+    └── S3Storage       (durable object-backed blocks)
+```
 
+The backend exposes a **flat block address space**; it has no awareness of files, directories, or artifacts.  
+Filesystems like ext4 translate file operations into block offsets.
 
-class Storage(ABC):
-    """
-    Abstract storage backend interface.
+---
 
-    Implementations persist opaque, fixed-size blocks identified by
-    (export_name, block_id). Blocks contain raw ext4/NBD data and may hold
-    user file data, filesystem metadata, or any mixture — this layer does
-    not interpret content.
+## 📁 Storage Layout
 
-    All reads and writes operate on EXACTLY one block at a time.
-    """
+Each export has its own namespace:
 
-    @abstractmethod
-    def read_block(self, export_name: str, block_id: int, block_size: int) -> bytes:
-        """
-        Read one block from storage.
+```
+/data/exports/<export_name>/blocks/<block_id>        # local mode
 
-        :param export_name: The name of the export (namespace).
-        :param block_id: The block index to read.
-        :param block_size: The size of the block in bytes.
-        :return: The raw block data as bytes, exactly block_size bytes long.
-        """
-        pass
+s3://<bucket>/exports/<export_name>/blocks/<block_id> # S3 mode
+```
 
-    @abstractmethod
-    def write_block(self, export_name: str, block_id: int, data: bytes) -> None:
-        """
-        Write one block to storage.
+Each `<block_id>` stores exactly one block of size `BLOCK_SIZE`.
 
-        :param export_name: The name of the export (namespace).
-        :param block_id: The block index to write.
-        :param data: The raw block data as bytes, must be exactly block_size bytes.
-        """
-        pass
+---
 
-    @abstractmethod
-    def flush(self, export_name: str) -> None:
-        """
-        Flush any buffered writes to durable storage.
+## 🛠️ Running Locally (Docker)
 
-        :param export_name: The name of the export (namespace).
-        """
-        pass
+Build:
+
+```
+docker build -t nbd-s3-backend -f docker/Dockerfile .
+```
+
+Run:
+
+```
+docker run --privileged -it \
+    -p 10809:10809 \
+    -v $(pwd)/data:/data \
+    nbd-s3-backend
+```
+
+Attach a Linux NBD client:
+
+```
+sudo nbd-client localhost 10809 -N test_device
+sudo mkfs.ext4 /dev/nbd0
+sudo mount /dev/nbd0 /mnt
+```
+
+Write test data:
+
+```
+echo "hello" | sudo tee /mnt/hello.txt
+sudo umount /mnt
+sudo nbd-client -d /dev/nbd0
+```
+
+After restart, reconnect and verify persistence.
+
+---
+
+## 📦 Code Structure
+
+```
+plugin/
+    nbdkit_replit.py    # main NBD backend (pread, pwrite, flush)
+    s3_backend.py       # S3 and local storage implementations
+    cache.py            # in-memory read/write cache (LRU)
+
+docker/
+    Dockerfile
+    run_local.sh
+
+tests/
+    basic_write_read.py
+```
+
+---
+
+## 🧪 Local Testing Example
+
+Added in main.py
+
+---
+
+## 📜 License
+
+MIT
+
+## S3 Storage (MinIO)
+
+This project supports an S3-compatible backend using **MinIO**, which runs locally via Docker.
+
+### Start MinIO
+
+Run the container:
+
+```bash
+docker run -p 9000:9000 -p 9001:9001 \
+  -e MINIO_ROOT_USER=minioadmin \
+  -e MINIO_ROOT_PASSWORD=minioadmin \
+  quay.io/minio/minio server /data --console-address ":9001"
+```
+- API Endpoint: http://localhost:9000
+- Web Console: http://localhost:9001
+- Username: minioadmin
+- Password: minioadmin
+
+### Run S3 Storage Tests
+
+- Start the docker container either in Docker Desktop or ```docker start <container name>```
+- ```pytest test_s3_storage.py```
