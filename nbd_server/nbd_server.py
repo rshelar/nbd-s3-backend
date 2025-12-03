@@ -51,6 +51,7 @@ class NbdServer:
         self.export_name = export_name
         self.total_size_bytes = total_size_bytes
         self.storage = storage
+        self.dirty_blocks = set()
 
     # ---------------------------------------------------------------------
     # Public API: these are the methods your NBD server / nbdkit plugin
@@ -188,3 +189,4 @@ class NbdServer:
                 self.storage.write_block(
                     self.export_name, block_id, bytes(existing_block)
                 )
+            self.dirty_blocks.add(block_id)
