@@ -38,7 +38,8 @@ class NbdServer:
             self,
             export_name: str,
             total_size_bytes: int,
-            storage = None,
+            volatile_storage = None,
+            nonvolatile_storage = None,
     ) -> None:
         """
         Args:
@@ -46,11 +47,13 @@ class NbdServer:
                          when storing blocks on disk.
             total_size_bytes: Size of the virtual block device in bytes.
                               get_size() will return this value.
-            storage: Storage object instantiated for either local FileStorage or remote Storage passed by the client.
+            volatile_storage: FileStorage Storage object representing volatile storage.
+            nonvolatile_storage: S3Storage object representing non-volatile storage.
         """
         self.export_name = export_name
         self.total_size_bytes = total_size_bytes
-        self.storage = storage
+        self.volatile_storage = volatile_storage
+        self.nonvolatile_storage = nonvolatile_storage
         self.dirty_blocks = set()
 
     # ---------------------------------------------------------------------
@@ -78,7 +81,7 @@ class NbdServer:
         Returns:
             A bytes object of length `length`.
         """
-        if self.storage is None:
+        if self.volatile_storage is None:
             raise RuntimeError("No storage backend configured for NbdServer")
 
         if length == 0:
@@ -91,7 +94,7 @@ class NbdServer:
         end = offset + length
 
         for block_id in blocks_touched(offset, length):
-            block = self.storage.read_block(self.export_name, block_id)
+            block = self.volatile_storage.read_block(self.export_name, block_id)
 
             block_start = block_id * BLOCK_SIZE
             block_end = block_start + BLOCK_SIZE
@@ -129,7 +132,7 @@ class NbdServer:
             2. Modify only the overlapping slice
             3. Write back the full block via storage.write_block()
         """
-        if self.storage is None:
+        if self.volatile_storage is None:
             raise RuntimeError("No storage backend configured for NbdServer")
 
         length = len(data)
@@ -170,11 +173,11 @@ class NbdServer:
                         f"Expected full-block slice of {BLOCK_SIZE} bytes, "
                         f"got {len(new_block)} bytes"
                     )
-                self.storage.write_block(self.export_name, block_id, new_block)
+                self.volatile_storage.write_block(self.export_name, block_id, new_block)
             else:
                 # Partial-block write → read-modify-write
                 existing_block = bytearray(
-                    self.storage.read_block(self.export_name, block_id)
+                    self.volatile_storage.read_block(self.export_name, block_id)
                 )
                 existing_block[
                 write_start_in_block:write_end_in_block
@@ -186,7 +189,7 @@ class NbdServer:
                         f"got {len(existing_block)} bytes"
                     )
 
-                self.storage.write_block(
+                self.volatile_storage.write_block(
                     self.export_name, block_id, bytes(existing_block)
                 )
             self.dirty_blocks.add(block_id)
