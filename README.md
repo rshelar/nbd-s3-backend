@@ -74,6 +74,38 @@ Filesystems like ext4 translate file operations into block offsets.
 
 ---
 
+## 🔄 Flush Semantics
+
+NbdServer tracks dirty blocks in a set. Each write(offset, bytes) marks the corresponding block_id as dirty.
+
+During flush():
+1. Iterate over all dirty block_ids
+2. Read each full block from FileStorage
+3. Write the entire block to S3Storage (durable backend)
+4. Clear the dirty block set
+
+---
+
+## 🧠 Why dirty_blocks is a set
+
+Multiple writes to the same block collapse into a single S3 write during flush.
+This guarantees idempotent flush behavior and avoids redundant durable writes.
+
+---
+
+## 📝 Design Overview
+
+This backend implements:
+- A block-device abstraction (NbdServer)
+- A volatile storage backend (FileStorage)
+- A durable S3 backend (S3Storage)
+- Correct flush semantics ensuring all completed writes persist
+- A Python nbdkit plugin exposing the device over NBD
+
+NbdServer handles block math, read/write correctness, and durability.
+
+---
+
 ## 📁 Storage Layout
 
 Each export has its own namespace:
@@ -88,64 +120,29 @@ Each `<block_id>` stores exactly one block of size `BLOCK_SIZE`.
 
 ---
 
-## 🛠️ Running Locally (Docker)
-
-Build:
-
-```
-docker build -t nbd-s3-backend -f docker/Dockerfile .
-```
-
-Run:
-
-```
-docker run --privileged -it \
-    -p 10809:10809 \
-    -v $(pwd)/data:/data \
-    nbd-s3-backend
-```
-
-Attach a Linux NBD client:
-
-```
-sudo nbd-client localhost 10809 -N test_device
-sudo mkfs.ext4 /dev/nbd0
-sudo mount /dev/nbd0 /mnt
-```
-
-Write test data:
-
-```
-echo "hello" | sudo tee /mnt/hello.txt
-sudo umount /mnt
-sudo nbd-client -d /dev/nbd0
-```
-
-After restart, reconnect and verify persistence.
-
----
-
 ## 📦 Code Structure
 
 ```
-plugin/
-    nbdkit_replit.py    # main NBD backend (pread, pwrite, flush)
-    s3_backend.py       # S3 and local storage implementations
-    cache.py            # in-memory read/write cache (LRU)
+nbd_server/
+    nbdkit_plugin.py
+    nbd_server.py
+    file_storage.py
+    s3_storage.py
+    util.py
+    cache.py
 
 docker/
     Dockerfile
     run_local.sh
 
 tests/
-    basic_write_read.py
+    test_file_storage.py
+    test_s3_storage.py
+    test_nbd_server.py
+
+data/
+    exports/
 ```
-
----
-
-## 🧪 Local Testing Example
-
-Added in main.py
 
 ---
 
