@@ -142,3 +142,67 @@ docker run -p 9000:9000 -p 9001:9001 \
 
 - Start the docker container either in Docker Desktop or ```docker start <container name>```
 - ```pytest test_s3_storage.py```
+
+## Running the Block Device via nbdkit
+
+1. Install nbdkit
+   On macOs:
+   ```commandline
+   brew install nbdkit
+   ``` 
+   On Linux:
+   ```commandline
+   sudo apt-get install nbdkit nbdkit-python
+   ```
+2. Run MinIO (if using S3 backend)
+   ```commandline
+   docker run -p 9000:9000 -p 9001:9001 \
+    -e MINIO_ROOT_USER=minioadmin \
+    -e MINIO_ROOT_PASSWORD=minioadmin \
+    quay.io/minio/minio server /data --console-address ":9001"
+   ``` 
+3. Run nbdkit with the Python plugin
+   ```commandline 
+   nbdkit python nbd_server/nbdkit_plugin.py \
+    export=testdev \
+    size=10485760 \
+    volatile_path=data/exports \
+    bucket=nbdbucket \
+    s3_endpoint=http://localhost:9000 \
+    s3_access_key=minioadmin \
+    s3_secret_key=minioadmin
+   ```
+   This starts an NBD server on port 10809 (default).
+
+4. Attach a Linux NBD client (inside VM)
+   ```commandline
+   sudo nbd-client localhost 10809 /dev/nbd0
+   ```
+   Format it:
+   ```commandline
+   sudo mkfs.ext4 /dev/nbd0
+   ``` 
+   Mount it:
+   ```commandline
+   sudo mount /dev/nbd0 /mnt
+   ```
+5. Test writing and flush behavior
+   ```commandline
+    echo "hello world" | sudo tee /mnt/hello.txt
+    sync
+   ``` 
+   The sync command triggers a flush:
+   •	nbdkit sends NBD_CMD_FLUSH
+   •	plugin calls NbdServer.flush()
+   •	dirty blocks are written to S3Storage
+
+    You should see new block objects appear in MinIO under:
+    ```commandline
+    exports/testdev/blocks/
+    ```
+   
+6. Unmount and detach
+   ```commandline
+   sudo umount /mnt
+   sudo nbd-client -d /dev/nbd0
+   ```
