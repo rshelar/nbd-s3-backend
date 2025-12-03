@@ -131,3 +131,26 @@ class TestNbdServer:
             return
 
         assert False, "Expected write to raise ValueError for out-of-bounds write"
+
+    def test_flush_persists_dirty_blocks(self):
+        server = self.make_server()
+        data = b"XYZ"
+        server.write(0, data)
+        # Before flush, durable storage should have no blocks
+        assert not os.path.exists(os.path.join(TEST_DURABLE, "exports/dev1/blocks/0"))
+
+        server.flush()
+
+        # After flush, durable storage must contain block 0
+        block0 = self.durable.read_block("dev1", 0)
+        assert block0[:3] == b"XYZ"
+
+    def test_flush_clears_dirty_blocks(self):
+        server = self.make_server()
+        server.write(50, b"hello")
+        assert len(server.dirty_blocks) == 1
+
+        server.flush()
+
+        # Dirty blocks should be cleared
+        assert len(server.dirty_blocks) == 0

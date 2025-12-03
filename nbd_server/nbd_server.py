@@ -54,6 +54,10 @@ class NbdServer:
         self.total_size_bytes = total_size_bytes
         self.volatile_storage = volatile_storage
         self.nonvolatile_storage = nonvolatile_storage
+        # Tracks blocks modified since last flush. A set is used instead of a list
+        # because multiple writes may target the same block. Using a set ensures
+        # each block_id appears only once, preventing redundant writes to durable
+        # storage during flush() and matching expected write‑back cache semantics.
         self.dirty_blocks = set()
 
     # ---------------------------------------------------------------------
@@ -193,3 +197,21 @@ class NbdServer:
                     self.export_name, block_id, bytes(existing_block)
                 )
             self.dirty_blocks.add(block_id)
+
+    def flush(self) -> None:
+        """
+        Persist all dirty blocks from volatile storage to non-volatile storage.
+
+        This implements proper NBD flush semantics:
+        - All completed writes prior to flush() are made durable.
+        - Each dirty block is flushed exactly once.
+        - After a successful flush, the dirty block set is cleared.
+        """
+        if self.nonvolatile_storage is None:
+            raise RuntimeError("Flush called but no non-volatile storage configured.")
+
+        for block_id in self.dirty_blocks:
+            block_bytes = self.volatile_storage.read_block(self.export_name, block_id)
+            self.nonvolatile_storage.write_block(self.export_name, block_id, block_bytes)
+
+        self.dirty_blocks.clear()
