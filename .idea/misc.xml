@@ -3,7 +3,7 @@
   <component name="Black">
     <option name="sdkName" value="Python 3.13 (nbd-s3-backend)" />
   </component>
-  <component name="ProjectRootManager" version="2" project-jdk-name="Python 3.13 (nbd-s3-backend)" project-jdk-type="Python SDK">
+  <component name="ProjectRootManager" version="2" languageLevel="JDK_23">
     <output url="file://$PROJECT_DIR$/out" />
   </component>
 </project>

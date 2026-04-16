@@ -7,7 +7,7 @@ from nbd_server.util import BLOCK_SIZE
 
 TEST_BASE = "test_data"   # isolated test directory
 
-
+# Set up function.
 def setup_function():
     """Run before each test: clean and recreate test directory."""
     if os.path.exists(TEST_BASE):
