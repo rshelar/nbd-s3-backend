@@ -3,7 +3,7 @@ import os
 from nbd_server.storage import Storage
 from nbd_server.util import BLOCK_SIZE
 
-
+# This class represents File storage.
 class FileStorage(Storage):
     """
     Local filesystem-backed block storage.
